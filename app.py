@@ -1,88 +1,70 @@
 import os
-from datetime import datetime
-from bson.objectid import ObjectId
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
-import os
-from dotenv import load_dotenv
-from pymongo import MongoClient
-load_dotenv()
-from dotenv import load_dotenv
-load_dotenv()
-app=Flask(__name__)
-app.secret_key=os.getenv("SECRET_KEY","change-me")
-client=MongoClient(os.getenv("MONGO_URI","mongodb://localhost:27017/"),serverSelectionTimeoutMS=5000)
-db=client[os.getenv("DB_NAME","bank_management")]
+from flask import Flask, render_template
+from flask_wtf import CSRFProtect
 
-@app.context_processor
-def globals():
-    return {"app_name":"Bank Management System","developer":"Jayesh Gaikwad"}
+from config import config_map
+from models import db
+from utils.helpers import currency, datetime_format, register_context_processors
 
-@app.route("/")
-def dashboard():
-    return render_template("dashboard.html",stats={
-        "customers":db.customers.count_documents({}),
-        "accounts":db.accounts.count_documents({}),
-        "transactions":db.transactions.count_documents({}),
-        "loans":db.loans.count_documents({})
-    })
 
-@app.route("/customers")
-def customers():
-    return render_template("customers.html",customers=list(db.customers.find().sort("created_at",-1)))
-@app.route("/customers/add",methods=["GET","POST"])
-def add_customer():
-    if request.method=="POST":
-        db.customers.insert_one({k:request.form.get(k,"") for k in ["name","email","phone","address"]}|{"created_at":datetime.utcnow()})
-        flash("Customer added.","success"); return redirect(url_for("customers"))
-    return render_template("form.html",title="Add Customer",fields=["name","email","phone","address"],action="add_customer")
-@app.route("/customers/delete/<id>")
-def delete_customer(id):
-    try: db.customers.delete_one({"_id":ObjectId(id)})
-    except: pass
-    return redirect(url_for("customers"))
+csrf = CSRFProtect()
 
-@app.route("/accounts")
-def accounts(): return render_template("accounts.html",accounts=list(db.accounts.find().sort("created_at",-1)))
-@app.route("/accounts/add",methods=["GET","POST"])
-def add_account():
-    if request.method=="POST":
-        db.accounts.insert_one({"account_no":request.form["account_no"],"customer":request.form["customer"],"type":request.form["type"],"balance":float(request.form.get("balance",0) or 0),"status":request.form["status"],"created_at":datetime.utcnow()})
-        flash("Account created.","success"); return redirect(url_for("accounts"))
-    return render_template("form.html",title="Open Account",fields=["account_no","customer","type","balance","status"],action="add_account")
 
-@app.route("/transactions",methods=["GET","POST"])
-def transactions():
-    if request.method=="POST":
-        db.transactions.insert_one({"account_no":request.form["account_no"],"type":request.form["type"],"amount":float(request.form["amount"]),"description":request.form.get("description",""),"created_at":datetime.utcnow()})
-        flash("Transaction recorded.","success"); return redirect(url_for("transactions"))
-    return render_template("transactions.html",transactions=list(db.transactions.find().sort("created_at",-1).limit(100)))
+def create_app(env_name=None):
+    app = Flask(__name__)
+    env_name = env_name or os.environ.get("FLASK_ENV", "default")
+    app.config.from_object(config_map.get(env_name, config_map["default"]))
 
-@app.route("/loans")
-def loans(): return render_template("loans.html",loans=list(db.loans.find().sort("created_at",-1)))
-@app.route("/loans/add",methods=["GET","POST"])
-def add_loan():
-    if request.method=="POST":
-        db.loans.insert_one({"customer":request.form["customer"],"amount":float(request.form["amount"]),"type":request.form["type"],"status":request.form["status"],"created_at":datetime.utcnow()})
-        flash("Loan saved.","success"); return redirect(url_for("loans"))
-    return render_template("form.html",title="New Loan",fields=["customer","amount","type","status"],action="add_loan")
+    db.init_app(app)
+    csrf.init_app(app)
 
-@app.route("/employees")
-def employees(): return render_template("module.html",title="Employees")
-@app.route("/cards")
-def cards(): return render_template("module.html",title="Cards")
-@app.route("/reports")
-def reports(): return render_template("module.html",title="Reports")
-@app.route("/settings")
-def settings(): return render_template("module.html",title="Settings")
+    # Jinja filters
+    app.jinja_env.filters["currency"] = currency
+    app.jinja_env.filters["dtfmt"] = datetime_format
+    register_context_processors(app)
 
-pages=["profile","notifications","audit","branches","atm","beneficiaries","payments","transfers","deposits","recurring","interest","kyc","documents","support","complaints","feedback","security","roles","backup","logs","analytics","monthly","annual","cashflow","reconciliation","statements","cheques","benefit","insurance","investments","forex","upi","netbanking","mobilebanking","offers","products","pricing","faq","about","contact","help","terms","privacy","developer"]
-for route in pages:
-    title=route.replace("-"," ").title()
-    def make_view(t):
-        def view(): return render_template("module.html",title=t)
-        return view
-    app.add_url_rule("/"+route,endpoint="p_"+route,view_func=make_view(title))
+    # ---- Blueprints -----------------------------------------------------
+    from routes.public import public_bp
+    from routes.auth import auth_bp
+    from routes.customer import customer_bp
+    from routes.account import account_bp
+    from routes.transaction import transaction_bp
+    from routes.loan import loan_bp
+    from routes.card import card_bp
+    from routes.support import support_bp
+    from routes.employee import employee_bp
+    from routes.admin import admin_bp
 
-@app.route("/api/stats")
-def api_stats(): return jsonify({c:db[c].count_documents({}) for c in ["customers","accounts","transactions","loans"]})
-if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.getenv("PORT",5000)),debug=True)
+    app.register_blueprint(public_bp)
+    app.register_blueprint(auth_bp, url_prefix="/auth")
+    app.register_blueprint(customer_bp, url_prefix="/customer")
+    app.register_blueprint(account_bp, url_prefix="/customer/accounts")
+    app.register_blueprint(transaction_bp, url_prefix="/customer/banking")
+    app.register_blueprint(loan_bp, url_prefix="/customer/loans")
+    app.register_blueprint(card_bp, url_prefix="/customer/cards")
+    app.register_blueprint(support_bp, url_prefix="/customer/support")
+    app.register_blueprint(employee_bp, url_prefix="/employee")
+    app.register_blueprint(admin_bp, url_prefix="/admin")
+
+    @app.errorhandler(404)
+    def not_found(e):
+        return render_template("errors/404.html"), 404
+
+    @app.errorhandler(500)
+    def server_error(e):
+        return render_template("errors/500.html"), 500
+
+    @app.after_request
+    def set_secure_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+    return app
+
+
+app = create_app()
+
+if __name__ == "__main__":
+    app.run(debug=app.config.get("DEBUG", False))

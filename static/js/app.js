@@ -1,0 +1,1 @@
+document.querySelectorAll('.danger').forEach(x=>x.onclick=e=>confirm('Delete this record?')||e.preventDefault());

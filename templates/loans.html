@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>Loans</h1><a class="btn" href="/loans/add">+ New Loan</a><table><tr><th>Customer</th><th>Type</th><th>Amount</th><th>Status</th></tr>{% for x in loans %}<tr><td>{{x.customer}}</td><td>{{x.type}}</td><td>₹{{x.amount}}</td><td>{{x.status}}</td></tr>{% else %}<tr><td colspan="4">No records.</td></tr>{% endfor %}</table>{% endblock %}

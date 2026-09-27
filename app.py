@@ -2,7 +2,10 @@ import os
 from datetime import datetime
 from bson.objectid import ObjectId
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+import os
+from dotenv import load_dotenv
 from pymongo import MongoClient
+load_dotenv()
 from dotenv import load_dotenv
 load_dotenv()
 app=Flask(__name__)
